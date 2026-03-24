@@ -1,0 +1,236 @@
+// 白夜读书会社群管理平台 - Prisma 数据模型定义
+// 包含用户、书单、讨论、甲骨交易等所有核心数据模型
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// 用户模型 - 支持多种角色和状态
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  nickname       String    @unique
+  role           String    @default("resident")
+  status         String    @default("active")
+  jiaguBalance   Int       @default(0)
+  joinDate       DateTime  @default(now())
+  blacklistUntil DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// 邀请码
+model InviteCode {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  usedBy    String?
+  usedAt    DateTime?
+  createdBy String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+}
+
+// 书籍
+model Book {
+  id          String   @id @default(cuid())
+  title       String
+  author      String
+  genre       String?
+  wordCount   Int?
+  pubYear     Int?
+  doubanScore Float?
+  source      String
+  isValid     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+// 白日梦书单
+model BookList {
+  id          String    @id @default(cuid())
+  period      Int
+  month       String
+  type        String    @default("normal")
+  status      String    @default("draft")
+  publishDate DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+// 荐书记录
+model Recommendation {
+  id              String   @id @default(cuid())
+  userId          String   // 提交人（居民账号ID，或NPC ID）
+  bookId          String
+  bookListId      String?
+  reason          String   // 推荐语
+  recommenderName String?  // 荐书人显示名（NPC添加时可手动指定；居民荐书时自动取昵称）
+  voteCount       Int      @default(0)
+  status          String   @default("pending") // pending | on_list | rejected
+  month           String   // YYYY-MM，归属月份
+  createdAt       DateTime @default(now())
+}
+
+// 预备榜投票
+model RecommendVote {
+  id               String   @id @default(cuid())
+  userId           String
+  recommendationId String
+  month            String
+  createdAt        DateTime @default(now())
+}
+
+// 选书记录
+model BookSelection {
+  id          String   @id @default(cuid())
+  userId      String
+  bookListId  String
+  bookId      String
+  isCompanion Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+// 讨论组
+model DiscussionGroup {
+  id         String    @id @default(cuid())
+  bookId     String
+  bookListId String
+  userA      String
+  userB      String
+  leaderId   String
+  status     String    @default("pending")
+  phase      String?
+  deadline   DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// 讨论记录
+model DiscussionRecord {
+  id          String   @id @default(cuid())
+  groupId     String
+  discussTime DateTime
+  location    String?
+  phase       String
+  submittedBy String
+  createdAt   DateTime @default(now())
+}
+
+// 甲骨流水
+model JiaguTransaction {
+  id        String   @id @default(cuid())
+  userId    String
+  amount    Int
+  type      String
+  reason    String
+  relatedId String?
+  createdAt DateTime @default(now())
+}
+
+// 道具卡
+model ItemCard {
+  id         String    @id @default(cuid())
+  userId     String
+  cardType   String
+  targetUser String?
+  bookId     String?
+  status     String    @default("unused")
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// 月度总结
+model Summary {
+  id         String   @id @default(cuid())
+  userId     String
+  month      String
+  fileUrl    String
+  fileName   String
+  uploadTime DateTime @default(now())
+  status     String   @default("submitted")
+}
+
+// 读书笔记
+model Note {
+  id         String   @id @default(cuid())
+  userId     String
+  bookId     String
+  content    String
+  wordCount  Int
+  uploadTime DateTime @default(now())
+  rewarded   Boolean  @default(false)
+}
+
+// 任务
+model Task {
+  id          String    @id @default(cuid())
+  type        String
+  creatorId   String
+  title       String
+  description String?
+  reward      Int?
+  startTime   DateTime?
+  duration    Int?
+  deadline    DateTime?
+  status      String    @default("open")
+  createdAt   DateTime  @default(now())
+}
+
+// 赏金任务
+model BountyTask {
+  id              String    @id @default(cuid())
+  creatorId       String
+  description     String
+  rewardPerPerson Int       @default(0)  // 税前每人甲骨
+  maxParticipants Int       @default(1)  // 最多可参与人数
+  deadline        DateTime?
+  status          String    @default("open") // open | settled
+  createdAt       DateTime  @default(now())
+}
+
+// 赏金任务参与记录
+model BountyParticipant {
+  id           String   @id @default(cuid())
+  bountyTaskId String
+  userId       String
+  createdAt    DateTime @default(now())
+}
+
+// 任务参与记录
+model TaskParticipant {
+  id       String   @id @default(cuid())
+  taskId   String
+  userId   String
+  joinTime DateTime @default(now())
+  duration Int?
+}
+
+// 违约记录
+model Breach {
+  id           String   @id @default(cuid())
+  userId       String
+  groupId      String
+  count        Int      @default(1)
+  penaltyJiagu Int
+  createdAt    DateTime @default(now())
+}
+
+// 通知消息
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  content   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// 系统配置
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}

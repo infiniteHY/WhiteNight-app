@@ -9,8 +9,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { writeFile } from "fs/promises";
-import { join } from "path";
+import { writeFile, readFile, mkdir, rm } from "fs/promises";
+import { join, basename } from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 /**
  * 检查当前是否在总结上传窗口期
@@ -73,7 +77,7 @@ function getSummaryMonth(): string {
 
 /**
  * GET /api/summaries
- * 获取总结列表
+ * 获取总结列表，或获取当月未提交总结的居民列表（action=missing），或导出zip（action=export）
  */
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -82,10 +86,57 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
+  const action = searchParams.get("action");
   const month = searchParams.get("month") || "";
   const userId = searchParams.get("userId") || "";
   const page = parseInt(searchParams.get("page") || "1");
   const pageSize = parseInt(searchParams.get("pageSize") || "20");
+
+  // 获取当月未提交总结的居民列表
+  if (action === "missing") {
+    if (!isAdmin(session.user.role)) {
+      return NextResponse.json({ error: "权限不足" }, { status: 403 });
+    }
+    const targetMonth = month || getSummaryMonth();
+    const [allResidents, submitted] = await Promise.all([
+      prisma.user.findMany({
+        where: { status: "active", role: { in: ["resident", "temp_reader"] } },
+        select: { id: true, nickname: true },
+      }),
+      prisma.summary.findMany({
+        where: { month: targetMonth },
+        select: { userId: true },
+      }),
+    ]);
+    const submittedIds = new Set(submitted.map((s) => s.userId));
+    const missing = allResidents.filter((u) => !submittedIds.has(u.id));
+    return NextResponse.json({ missing, total: missing.length, month: targetMonth });
+  }
+
+  // 导出zip
+  if (action === "export") {
+    if (!isAdmin(session.user.role)) {
+      return NextResponse.json({ error: "权限不足" }, { status: 403 });
+    }
+    const targetMonth = month || getSummaryMonth();
+    const uploadDir = join(process.cwd(), "public", "uploads", "summaries", targetMonth);
+    const tmpDir = join(process.cwd(), "tmp");
+    const zipPath = join(tmpDir, `summaries-${targetMonth}.zip`);
+    try {
+      await mkdir(tmpDir, { recursive: true });
+      await execAsync(`cd "${join(process.cwd(), "public", "uploads", "summaries")}" && zip -r "${zipPath}" "${targetMonth}" 2>/dev/null`);
+      const zipData = await readFile(zipPath);
+      await rm(zipPath).catch(() => {});
+      return new Response(zipData, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="summaries-${targetMonth}.zip"`,
+        },
+      });
+    } catch {
+      return NextResponse.json({ error: "导出失败，目录可能为空" }, { status: 500 });
+    }
+  }
 
   const where: Record<string, unknown> = {};
   if (month) where.month = month;

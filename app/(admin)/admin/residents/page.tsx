@@ -60,6 +60,7 @@ export default function AdminResidentsPage() {
     value: "",
     reason: "",
   });
+  const [inviteExpiresAt, setInviteExpiresAt] = useState("");
 
   useEffect(() => {
     loadData();
@@ -128,18 +129,35 @@ export default function AdminResidentsPage() {
       const res = await fetch("/api/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ expiresAt: inviteExpiresAt || undefined }),
       });
 
       const data = await res.json();
       if (res.ok) {
         setMessage(`✅ 邀请码已创建：${data.invite.code}`);
+        setInviteExpiresAt("");
         loadData();
       } else {
         setMessage(`❌ ${data.error}`);
       }
     } catch {
       setMessage("❌ 创建失败");
+    }
+  };
+
+  const deleteInviteCode = async (id: string) => {
+    if (!confirm("确认删除该邀请码？")) return;
+    try {
+      const res = await fetch(`/api/invite?id=${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage("✅ 邀请码已删除");
+        loadData();
+      } else {
+        setMessage(`❌ ${data.error}`);
+      }
+    } catch {
+      setMessage("❌ 删除失败");
     }
   };
 
@@ -273,7 +291,16 @@ export default function AdminResidentsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex justify-end">
+          <div className="flex items-end gap-3 justify-end">
+            <div>
+              <Label className="text-xs text-gray-500">过期时间（可选）</Label>
+              <Input
+                type="datetime-local"
+                value={inviteExpiresAt}
+                onChange={(e) => setInviteExpiresAt(e.target.value)}
+                className="w-48 text-sm"
+              />
+            </div>
             <Button onClick={createInviteCode}>
               <Key className="h-4 w-4 mr-2" />
               生成邀请码
@@ -290,6 +317,7 @@ export default function AdminResidentsPage() {
                     <th className="text-left px-4 py-3 font-medium text-gray-600">使用时间</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600">过期时间</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600">创建时间</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -313,6 +341,17 @@ export default function AdminResidentsPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-400 text-xs">
                         {formatDate(invite.createdAt)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {!invite.usedBy && (
+                          <button
+                            onClick={() => deleteInviteCode(invite.id)}
+                            className="text-gray-300 hover:text-red-500 transition-colors text-xs"
+                            title="删除邀请码"
+                          >
+                            删除
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

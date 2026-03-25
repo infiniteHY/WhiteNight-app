@@ -225,7 +225,7 @@ export default function AdminDashboardPage() {
                     <th className="text-left py-2">角色</th>
                     <th className="text-left py-2">状态</th>
                     <th className="text-right py-2">甲骨</th>
-                    <th className="text-left py-2">加入时间</th>
+                    <th className="text-right py-2">加入时间</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -241,7 +241,7 @@ export default function AdminDashboardPage() {
                       <td className={`py-2 text-right font-medium ${user.jiaguBalance < 0 ? "text-red-500" : "text-gray-800"}`}>
                         {user.jiaguBalance}
                       </td>
-                      <td className="py-2 text-gray-400 text-xs">
+                      <td className="py-2 text-gray-400 text-xs text-right">
                         {new Date(user.joinDate).toLocaleDateString("zh-CN")}
                       </td>
                     </tr>

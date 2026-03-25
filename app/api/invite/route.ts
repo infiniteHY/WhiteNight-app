@@ -60,3 +60,25 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ invite }, { status: 201 });
 }
+
+/**
+ * DELETE /api/invite?id=xxx
+ * 删除邀请码（管理员权限，已使用的邀请码不可删除）
+ */
+export async function DELETE(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session || !isAdmin(session.user.role)) {
+    return NextResponse.json({ error: "权限不足" }, { status: 403 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "缺少ID" }, { status: 400 });
+
+  const invite = await prisma.inviteCode.findUnique({ where: { id } });
+  if (!invite) return NextResponse.json({ error: "邀请码不存在" }, { status: 404 });
+  if (invite.usedBy) return NextResponse.json({ error: "已使用的邀请码不可删除" }, { status: 400 });
+
+  await prisma.inviteCode.delete({ where: { id } });
+  return NextResponse.json({ message: "邀请码已删除" });
+}

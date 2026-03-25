@@ -204,9 +204,17 @@ export async function POST(request: NextRequest) {
     where: { bookListId },
   });
 
-  // 按书目分组
+  // 获取已使用闪避卡的记录（按 bookId）
+  const dodgeCards = await prisma.itemCard.findMany({
+    where: { cardType: "dodge", status: "used", bookId: { in: [...new Set(selections.map(s => s.bookId))] } },
+    select: { userId: true, bookId: true },
+  });
+  const dodgeSet = new Set(dodgeCards.map(d => `${d.userId}::${d.bookId}`));
+
+  // 按书目分组（排除使用闪避卡的用户）
   const bookUserMap = new Map<string, string[]>();
   for (const selection of selections) {
+    if (dodgeSet.has(`${selection.userId}::${selection.bookId}`)) continue;
     if (!bookUserMap.has(selection.bookId)) {
       bookUserMap.set(selection.bookId, []);
     }
@@ -247,6 +255,10 @@ export async function POST(request: NextRequest) {
     // 生成配对
     const pairs = await generateGroups(bookId, bookListId, userIds);
 
+    // 截止日期：选书关闭后下个月的最后一天 23:59:59
+    const now = new Date();
+    const deadline = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59);
+
     for (const pair of pairs) {
       const group = await prisma.discussionGroup.create({
         data: {
@@ -256,6 +268,7 @@ export async function POST(request: NextRequest) {
           userB: pair.userB,
           leaderId,
           status: "pending",
+          deadline,
         },
       });
       createdGroups.push(group);
@@ -343,6 +356,7 @@ export async function PATCH(request: NextRequest) {
       black_box: 10,
       dodge: 10,
       discussion_bye: 8,
+      extension_card: 8,
     };
 
     const cost = cardCosts[cardType];
@@ -350,15 +364,78 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "无效的卡片类型" }, { status: 400 });
     }
 
+    // 延期卡：提前验证讨论组（在扣费前）
+    if (cardType === "extension_card") {
+      if (!groupId) {
+        return NextResponse.json({ error: "延期卡需要指定讨论组ID" }, { status: 400 });
+      }
+      const extGroup = await prisma.discussionGroup.findUnique({ where: { id: groupId } });
+      if (!extGroup) {
+        return NextResponse.json({ error: "讨论组不存在" }, { status: 404 });
+      }
+      if (extGroup.userA !== session.user.id && extGroup.userB !== session.user.id) {
+        return NextResponse.json({ error: "您不在该讨论组中" }, { status: 400 });
+      }
+      if (extGroup.status !== "pending") {
+        return NextResponse.json({ error: "只能对待开始的讨论组使用延期卡" }, { status: 400 });
+      }
+    }
+
+    // 闪避卡：在书单关闭后、分组前使用；使用后不参与该书的讨论分组，须提交读书笔记
+    if (cardType === "dodge") {
+      if (!cardBookListId || !cardBookId) {
+        return NextResponse.json({ error: "闪避卡需要指定书单和书目" }, { status: 400 });
+      }
+      const dodgeBookList = await prisma.bookList.findUnique({ where: { id: cardBookListId } });
+      if (!dodgeBookList || dodgeBookList.status !== "closed") {
+        return NextResponse.json({ error: "技能卡使用窗口：选书截止后至分组前" }, { status: 400 });
+      }
+      const existingGroups = await prisma.discussionGroup.count({ where: { bookListId: cardBookListId, bookId: cardBookId } });
+      if (existingGroups > 0) {
+        return NextResponse.json({ error: "该书目分组已生成，无法再使用闪避卡" }, { status: 400 });
+      }
+      const mySel = await prisma.bookSelection.findFirst({
+        where: { userId: session.user.id, bookListId: cardBookListId, bookId: cardBookId },
+      });
+      if (!mySel) {
+        return NextResponse.json({ error: "您未选择该书目" }, { status: 400 });
+      }
+      const alreadyUsed = await prisma.itemCard.findFirst({
+        where: { userId: session.user.id, cardType: "dodge", bookId: cardBookId, status: "used" },
+      });
+      if (alreadyUsed) {
+        return NextResponse.json({ error: "您已对该书目使用过闪避卡" }, { status: 400 });
+      }
+    }
+
     if (session.user.jiaguBalance < cost) {
       return NextResponse.json({ error: "甲骨余额不足" }, { status: 400 });
     }
 
-    await changeJiagu(session.user.id, -cost, `使用黑箱卡`, cardBookId || groupId);
+    const cardReasonMap: Record<string, string> = {
+      black_box: "使用黑箱卡",
+      dodge: "使用闪避卡",
+      discussion_bye: "使用讨论假条",
+      extension_card: "使用延期卡",
+    };
+    await changeJiagu(session.user.id, -cost, cardReasonMap[cardType] || `使用${cardType}`, cardBookId || groupId);
 
     // 黑箱卡：目标用户立即获得8甲骨补偿
     if (cardType === "black_box" && targetUserId) {
       await changeJiagu(targetUserId, 8, "被黑箱卡指定，获得补偿甲骨", cardBookId || groupId);
+    }
+
+    // 延期卡：将讨论截止时间延长7天
+    if (cardType === "extension_card" && groupId) {
+      const extGroup = await prisma.discussionGroup.findUnique({ where: { id: groupId } });
+      if (extGroup) {
+        const currentDeadline = extGroup.deadline || new Date();
+        const newDeadline = new Date(currentDeadline.getTime() + 7 * 24 * 60 * 60 * 1000);
+        await prisma.discussionGroup.update({
+          where: { id: groupId },
+          data: { deadline: newDeadline },
+        });
+      }
     }
 
     await prisma.itemCard.create({
@@ -366,13 +443,19 @@ export async function PATCH(request: NextRequest) {
         userId: session.user.id,
         cardType,
         targetUser: targetUserId || null,
-        bookId: cardBookId || null,
+        bookId: cardType === "extension_card" ? groupId : (cardBookId || groupId || null),
         status: "used",
         usedAt: new Date(),
       },
     });
 
-    return NextResponse.json({ message: "黑箱卡使用成功，将在分组时自动与目标成为一组" });
+    const cardMessages: Record<string, string> = {
+      black_box: "黑箱卡使用成功，将在分组时自动与目标成为一组",
+      dodge: "闪避卡使用成功，已退出当前讨论组",
+      discussion_bye: "讨论假条使用成功",
+      extension_card: "延期卡使用成功，讨论截止时间已延长7天",
+    };
+    return NextResponse.json({ message: cardMessages[cardType] || "使用成功" });
   }
 
   if (!isAdmin(session.user.role)) {

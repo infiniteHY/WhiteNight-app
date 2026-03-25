@@ -108,13 +108,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "每次最多选择3本书" }, { status: 400 });
   }
 
-  // 检查是否已选过
+  // 检查已有选书数量（支持重新选书：允许追加，总数不超过3）
   const existingSelections = await prisma.bookSelection.findMany({
     where: { userId: session.user.id, bookListId },
   });
 
-  if (existingSelections.length > 0) {
-    return NextResponse.json({ error: "本期书单已完成选书" }, { status: 400 });
+  const existingBookIds = new Set(existingSelections.map((s) => s.bookId));
+  const newBookIds = bookIds.filter((id: string) => !existingBookIds.has(id));
+  if (existingSelections.length + newBookIds.length > 3) {
+    return NextResponse.json(
+      { error: `选书总数不能超过3本（当前已选${existingSelections.length}本）` },
+      { status: 400 }
+    );
+  }
+
+  // 如果没有新书需要添加，直接返回成功
+  if (newBookIds.length === 0) {
+    return NextResponse.json({ message: "选书已是最新状态", count: 0 });
   }
 
   // 验证书目在书单中
@@ -133,9 +143,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 创建选书记录
+  // 创建新的选书记录（仅未选过的书）
   await prisma.bookSelection.createMany({
-    data: bookIds.map((bookId: string) => ({
+    data: newBookIds.map((bookId: string) => ({
       userId: session.user.id,
       bookListId,
       bookId,
@@ -144,8 +154,8 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({
-    message: `选书成功，共选择${bookIds.length}本`,
-    count: bookIds.length,
+    message: `选书成功，共选择${newBookIds.length}本`,
+    count: newBookIds.length,
   });
 }
 

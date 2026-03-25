@@ -243,6 +243,23 @@ export default function AdminBooksPage() {
     }
   };
 
+  /** 重新开启选书窗口（closed → selection_open） */
+  const handleOpenSelection = async (listId: string) => {
+    if (!confirm("确认重新开启选书窗口？居民将可以再次选书。")) return;
+    const res = await fetch("/api/booklists", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookListId: listId, action: "openSelection" }),
+    });
+    const data = await safeJson(res);
+    if (res.ok) {
+      showMsg("选书窗口已重新开启", true);
+      loadBookLists();
+    } else {
+      showMsg(data.error || "操作失败", false);
+    }
+  };
+
   /** 关闭选书窗口（selection_open → closed） */
   const handleClose = async (listId: string) => {
     const res = await fetch("/api/booklists", {
@@ -573,8 +590,20 @@ export default function AdminBooksPage() {
                       </Button>
                     )}
 
-                    {/* 删除按钮（仅草稿） */}
-                    {list.status === "draft" && (
+                    {/* 重新开启选书（已关闭状态） */}
+                    {list.status === "closed" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 text-green-600 border-green-300 hover:bg-green-50"
+                        onClick={(e) => { e.stopPropagation(); handleOpenSelection(list.id); }}
+                      >
+                        开启选书
+                      </Button>
+                    )}
+
+                    {/* 删除按钮（草稿 or 已关闭） */}
+                    {(list.status === "draft" || list.status === "closed") && (
                       deleteConfirmId === list.id ? (
                         <div
                           className="flex gap-1 flex-1"
@@ -680,7 +709,7 @@ export default function AdminBooksPage() {
                               </p>
                             )}
                           </div>
-                          {selectedList?.status === "draft" && (
+                          {(selectedList?.status === "draft" || selectedList?.status === "closed") && (
                             <button
                               title="从书单移除"
                               onClick={() => handleRemove(selectedList.id, entry.bookId)}
@@ -696,8 +725,15 @@ export default function AdminBooksPage() {
                 </CardContent>
               </Card>
 
-              {/* ── 只在草稿状态展示添加工具 ── */}
-              {selectedList?.status === "draft" && (
+              {/* 选书中：锁定提示 */}
+              {selectedList?.status === "selection_open" && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
+                  ⚠️ 选书进行中，书目不可编辑。请先关闭选书窗口再做调整。
+                </div>
+              )}
+
+              {/* ── 草稿或已关闭状态展示添加工具 ── */}
+              {(selectedList?.status === "draft" || selectedList?.status === "closed") && (
                 <>
                   {/* ━━━ 工具一：直接填写添加书目 ━━━ */}
                   <Card>

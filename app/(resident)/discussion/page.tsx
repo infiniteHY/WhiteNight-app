@@ -44,6 +44,7 @@ const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secon
   pending: { label: "待开始", variant: "secondary" },
   completed: { label: "讨论完", variant: "success" },
   breached: { label: "已违约", variant: "destructive" },
+  dodged: { label: "已闪避", variant: "outline" },
 };
 
 /**
@@ -266,24 +267,66 @@ export default function DiscussionPage() {
                     })}
                   </div>
 
-                  {/* 提交讨论按钮 */}
-                  {group.status === "pending" && isMyGroup && (
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      onClick={() => {
-                        setSubmitModal(group.id);
-                        setDiscussForm({
-                          discussTime: new Date().toISOString().slice(0, 16),
-                          location: "",
-                          phase: currentPhase,
-                        });
-                      }}
-                    >
-                      <MessageSquare className="h-4 w-4 mr-2" />
-                      提交讨论记录
-                    </Button>
+                  {/* 截止时间 */}
+                  {group.deadline && group.status === "pending" && (
+                    <div className={`text-xs mb-3 flex items-center gap-1 ${
+                      new Date() > new Date(group.deadline) ? "text-red-500" : "text-gray-400"
+                    }`}>
+                      <Clock className="h-3 w-3" />
+                      讨论截止：{new Date(group.deadline).toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}
+                      {new Date() > new Date(group.deadline) && " （已过期）"}
+                    </div>
                   )}
+
+                  {/* 提交讨论 + 延期卡 */}
+                  {group.status === "pending" && isMyGroup && (() => {
+                    const isPastDeadline = group.deadline && new Date() > new Date(group.deadline);
+                    return (
+                      <div className="space-y-2">
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          disabled={!!isPastDeadline}
+                          onClick={() => {
+                            setSubmitModal(group.id);
+                            setDiscussForm({
+                              discussTime: new Date().toISOString().slice(0, 16),
+                              location: "",
+                              phase: currentPhase,
+                            });
+                          }}
+                        >
+                          <MessageSquare className="h-4 w-4 mr-2" />
+                          提交讨论记录
+                        </Button>
+                        {isPastDeadline && (
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 text-xs text-center text-red-400 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                              讨论已过截止时间，无法提交
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-amber-600 hover:text-amber-700 hover:border-amber-400 border-amber-300 text-xs"
+                              onClick={async () => {
+                                if (!confirm("使用延期卡将消耗 8 甲骨，讨论截止时间延长7天。确认使用？")) return;
+                                const res = await fetch("/api/admin/groups", {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ action: "useCard", cardType: "extension_card", groupId: group.id }),
+                                });
+                                const data = await res.json();
+                                if (res.ok) { setMessage(`✅ ${data.message}`); loadGroups(); }
+                                else setMessage(`❌ ${data.error}`);
+                              }}
+                            >
+                              延期卡 −8甲骨
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* 讨论记录 */}
                   {group.records.length > 0 && (

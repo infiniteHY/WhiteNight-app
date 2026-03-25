@@ -6,7 +6,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText } from "lucide-react";
+import { FileText, Download, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,13 +25,21 @@ interface Summary {
   user: { id: string; nickname: string };
 }
 
+interface MissingUser {
+  id: string;
+  nickname: string;
+}
+
 type WindowMode = "auto" | "open" | "closed" | "custom";
 
 export default function AdminSummariesPage() {
   const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [missing, setMissing] = useState<MissingUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showMissing, setShowMissing] = useState(false);
   const [message, setMessage] = useState("");
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [exporting, setExporting] = useState(false);
 
   // 上传窗口控制
   const [windowMode, setWindowMode] = useState<WindowMode>("auto");
@@ -42,6 +50,7 @@ export default function AdminSummariesPage() {
   useEffect(() => {
     loadData();
     loadWindowConfig();
+    loadMissing();
   }, [filterMonth]);
 
   const loadWindowConfig = async () => {
@@ -74,7 +83,7 @@ export default function AdminSummariesPage() {
 
   const loadData = async () => {
     try {
-      const res = await fetch(`/api/summaries?month=${filterMonth}&pageSize=50`);
+      const res = await fetch(`/api/summaries?month=${filterMonth}&pageSize=200`);
       const data = await res.json();
       setSummaries(data.summaries || []);
     } catch (error) {
@@ -84,20 +93,34 @@ export default function AdminSummariesPage() {
     }
   };
 
-  const approveSummary = async (summaryId: string) => {
+  const loadMissing = async () => {
     try {
-      const res = await fetch("/api/summaries", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ summaryId, status: "approved" }),
-      });
+      const res = await fetch(`/api/summaries?action=missing&month=${filterMonth}`);
+      const data = await res.json();
+      setMissing(data.missing || []);
+    } catch {}
+  };
 
-      if (res.ok) {
-        setMessage("✅ 总结已审核通过");
-        loadData();
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/summaries?action=export&month=${filterMonth}`);
+      if (!res.ok) {
+        const data = await res.json();
+        setMessage(`❌ ${data.error || "导出失败"}`);
+        return;
       }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `summaries-${filterMonth}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch {
-      setMessage("❌ 操作失败");
+      setMessage("❌ 导出失败");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -105,14 +128,11 @@ export default function AdminSummariesPage() {
     return <div className="flex items-center justify-center h-64 text-gray-500">加载中...</div>;
   }
 
-  const approvedCount = summaries.filter((s) => s.status === "approved").length;
-  const pendingCount = summaries.filter((s) => s.status === "submitted").length;
-
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">总结统计</h1>
-        <p className="text-gray-600 mt-1">查看和审核月度总结</p>
+        <p className="text-gray-600 mt-1">查看月度总结提交情况</p>
       </div>
 
       {message && (
@@ -128,7 +148,6 @@ export default function AdminSummariesPage() {
           <CardTitle className="text-base">总结上传窗口设置</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 模式选择 */}
           <div className="grid grid-cols-4 gap-2">
             {([
               { value: "auto", label: "自动", desc: "按系统日期" },
@@ -153,29 +172,19 @@ export default function AdminSummariesPage() {
             ))}
           </div>
 
-          {/* 自定义时间段 */}
           {windowMode === "custom" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>开始时间</Label>
-                <Input
-                  type="datetime-local"
-                  value={windowStart}
-                  onChange={(e) => setWindowStart(e.target.value)}
-                />
+                <Input type="datetime-local" value={windowStart} onChange={(e) => setWindowStart(e.target.value)} />
               </div>
               <div>
                 <Label>结束时间</Label>
-                <Input
-                  type="datetime-local"
-                  value={windowEnd}
-                  onChange={(e) => setWindowEnd(e.target.value)}
-                />
+                <Input type="datetime-local" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} />
               </div>
             </div>
           )}
 
-          {/* 当前状态说明 */}
           <div className="flex items-center justify-between">
             <p className="text-sm text-gray-500">
               {windowMode === "auto" && "当前使用自动规则：月倒数第3天12:00 至 下月7号23:59"}
@@ -192,18 +201,63 @@ export default function AdminSummariesPage() {
         </CardContent>
       </Card>
 
-      {/* 过滤 */}
-      <div className="flex items-center space-x-3">
-        <input
-          type="month"
-          className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-          value={filterMonth}
-          onChange={(e) => setFilterMonth(e.target.value)}
-        />
-        <div className="text-sm text-gray-500">
-          已提交：{summaries.length}篇 · 已审核：{approvedCount}篇 · 待审核：{pendingCount}篇
+      {/* 过滤 + 操作 */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center space-x-3">
+          <input
+            type="month"
+            className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={filterMonth}
+            onChange={(e) => setFilterMonth(e.target.value)}
+          />
+          <div className="text-sm text-gray-500">
+            已提交：{summaries.length}篇 · 未提交：{missing.length}人
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowMissing(!showMissing)}
+          >
+            <Users className="h-4 w-4 mr-1.5" />
+            {showMissing ? "隐藏" : "未提交居民"}（{missing.length}）
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={exporting || summaries.length === 0}
+          >
+            <Download className="h-4 w-4 mr-1.5" />
+            {exporting ? "导出中..." : "打包下载"}
+          </Button>
         </div>
       </div>
+
+      {/* 未提交居民列表 */}
+      {showMissing && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-amber-800">
+              {filterMonth} 未提交总结的居民（{missing.length}人）
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {missing.length === 0 ? (
+              <p className="text-sm text-green-600">🎉 所有居民均已提交总结！</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {missing.map((u) => (
+                  <span key={u.id} className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-sm">
+                    {u.nickname}
+                  </span>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 总结列表 */}
       <Card>
@@ -214,7 +268,6 @@ export default function AdminSummariesPage() {
                 <th className="text-left px-4 py-3 text-gray-600">居民</th>
                 <th className="text-left px-4 py-3 text-gray-600">文件名</th>
                 <th className="text-left px-4 py-3 text-gray-600">上传时间</th>
-                <th className="text-left px-4 py-3 text-gray-600">状态</th>
                 <th className="text-right px-4 py-3 text-gray-600">操作</th>
               </tr>
             </thead>
@@ -228,22 +281,10 @@ export default function AdminSummariesPage() {
                   <td className="px-4 py-3 text-gray-400 text-xs">
                     {formatDateTime(summary.uploadTime)}
                   </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={summary.status === "approved" ? "success" : "secondary"}>
-                      {summary.status === "approved" ? "已审核" : "待审核"}
-                    </Badge>
-                  </td>
                   <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end space-x-2">
-                      <a href={summary.fileUrl} target="_blank" rel="noopener noreferrer">
-                        <Button variant="ghost" size="sm">查看</Button>
-                      </a>
-                      {summary.status === "submitted" && (
-                        <Button size="sm" onClick={() => approveSummary(summary.id)}>
-                          通过
-                        </Button>
-                      )}
-                    </div>
+                    <a href={summary.fileUrl} target="_blank" rel="noopener noreferrer">
+                      <Button variant="ghost" size="sm">查看</Button>
+                    </a>
                   </td>
                 </tr>
               ))}

@@ -13,6 +13,16 @@ export default withAuth(
     const { pathname } = req.nextUrl;
     const token = req.nextauth.token;
 
+    // 清退用户强制登出（不允许访问任何页面）
+    if (token && token.status === "expelled") {
+      const logoutUrl = new URL("/login", req.url);
+      logoutUrl.searchParams.set("error", "expelled");
+      const response = NextResponse.redirect(logoutUrl);
+      response.cookies.delete("next-auth.session-token");
+      response.cookies.delete("__Secure-next-auth.session-token");
+      return response;
+    }
+
     // 检查管理员路由
     if (pathname.startsWith("/admin")) {
       const adminRoles = ["super_admin", "booklist_npc", "stats_npc", "npc"];

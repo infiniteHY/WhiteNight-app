@@ -208,6 +208,17 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ bookList: updatedList });
       }
 
+      case "openSelection": {
+        if (bookList.status !== "closed") {
+          return NextResponse.json({ error: "只能重新开启已关闭的书单" }, { status: 400 });
+        }
+        const updatedList = await prisma.bookList.update({
+          where: { id: bookListId },
+          data: { status: "selection_open", publishDate: new Date() },
+        });
+        return NextResponse.json({ bookList: updatedList });
+      }
+
       default:
         return NextResponse.json({ error: "未知操作" }, { status: 400 });
     }
@@ -242,10 +253,10 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "书单不存在" }, { status: 404 });
   }
 
-  // 已发布/选书中的书单不允许删除，避免影响居民选书流程
-  if (bookList.status !== "draft") {
+  // 选书中的书单不允许删除，避免影响居民选书流程；草稿和已关闭可删除
+  if (bookList.status === "selection_open") {
     return NextResponse.json(
-      { error: "只能删除草稿状态的书单" },
+      { error: "选书进行中的书单无法删除，请先关闭选书" },
       { status: 400 }
     );
   }

@@ -5,15 +5,9 @@
  */
 
 import { PrismaClient } from "@prisma/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
 import bcrypt from "bcryptjs";
-import path from "path";
 
-// 数据库路径指向项目根目录的 dev.db（与 prisma.config.ts 一致）
-const dbUrl = process.env.DATABASE_URL || `file:${path.join(__dirname, "..", "dev.db")}`;
-
-const adapter = new PrismaLibSql({ url: dbUrl });
-const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient();
 
 async function main() {
   console.log("🌱 开始初始化数据库种子数据...");
